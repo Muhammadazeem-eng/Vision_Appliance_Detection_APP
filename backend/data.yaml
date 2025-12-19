@@ -1,0 +1,7 @@
+train: D:/work/coffee/dataset/train/images
+val: D:/work/coffee/dataset/valid/images
+test: D:/work/coffee/dataset/test/images
+
+nc: 5
+names: ['coffee_machine', 'customer_fridge', 'dishwasher', 'light_fixture', 'toaster']
+

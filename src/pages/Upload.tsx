@@ -4,7 +4,6 @@ import { Upload as UploadIcon, Image as ImageIcon, Loader2 } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { generateMockAnalysis } from "@/lib/mockData";
 
 export default function Upload() {
   const [isDragging, setIsDragging] = useState(false);
@@ -27,7 +26,7 @@ export default function Upload() {
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    
+
     const file = e.dataTransfer.files[0];
     if (file && file.type.startsWith("image/")) {
       setSelectedFile(file);
@@ -53,29 +52,60 @@ export default function Upload() {
     if (!selectedFile) return;
 
     setIsAnalyzing(true);
-    
-    // Simulate API call with delay
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    // Generate mock analysis result
-    const result = generateMockAnalysis(previewUrl);
-    
-    // Store result in sessionStorage for the results page
-    sessionStorage.setItem("latestAnalysis", JSON.stringify(result));
-    
-    toast({
-      title: "Analysis complete!",
-      description: `Detected ${result.detections.length} appliances with ${result.totalKgCO2Month.toFixed(2)} kgCO₂/month`,
-    });
-    
-    setIsAnalyzing(false);
-    navigate(`/results/${result.id}`);
+
+    try {
+      // 1. Prepare base64 for OpenAI
+      const reader = new FileReader();
+      const base64Promise = new Promise<string>((resolve, reject) => {
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(selectedFile);
+      });
+      const base64Image = await base64Promise;
+
+      // 2. Parallel execution: Upload to local API (visuals) and OpenAI (data)
+      const { uploadImage } = await import("@/lib/api");
+      const { analyzeImage } = await import("@/lib/openai");
+
+      const [uploadResult, energyAnalysis] = await Promise.all([
+        uploadImage(selectedFile),
+        analyzeImage(base64Image)
+      ]);
+
+      // 3. Construct final result
+      const result = {
+        id: crypto.randomUUID(),
+        imageUrl: uploadResult.image_url || previewUrl, // Use annotated image from local API if available
+        detections: energyAnalysis.detections || [], // Use OpenAI detections (or dummy ones)
+        ...energyAnalysis,
+        timestamp: new Date(),
+      };
+
+      // Store result in sessionStorage for the results page
+      sessionStorage.setItem("latestAnalysis", JSON.stringify(result));
+
+      toast({
+        title: "Analysis complete!",
+        description: `Analyzed appliances with ${result.totalKgCO2Month.toFixed(2)} kgCO₂/month`,
+      });
+
+      navigate(`/results/${result.id}`);
+    } catch (error) {
+      console.error("Analysis failed:", error);
+      toast({
+        title: "Analysis failed",
+        description: error instanceof Error ? error.message : "An unexpected error occurred",
+        variant: "destructive",
+      });
+    } finally {
+      setIsAnalyzing(false);
+    }
   };
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <div className="text-center space-y-2">
-        <h2 className="text-3xl font-bold text-foreground">Upload Coffee Shop Image</h2>
+        <h2 className="text-3xl font-bold text-foreground">Upload Image Here</h2>
         <p className="text-muted-foreground">
           Our AI will detect appliances and analyze energy efficiency
         </p>
@@ -95,8 +125,8 @@ export default function Upload() {
             onDrop={handleDrop}
             className={`
               border-2 border-dashed rounded-lg p-12 text-center transition-all cursor-pointer
-              ${isDragging 
-                ? "border-primary bg-primary/5 scale-105" 
+              ${isDragging
+                ? "border-primary bg-primary/5 scale-105"
                 : "border-border hover:border-primary/50 hover:bg-muted/50"
               }
             `}
@@ -108,7 +138,7 @@ export default function Upload() {
               accept="image/*"
               onChange={handleFileInput}
             />
-            
+
             {!previewUrl ? (
               <label htmlFor="file-upload" className="cursor-pointer block">
                 <UploadIcon className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
